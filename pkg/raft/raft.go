@@ -189,8 +189,7 @@ func (rn *RaftNode) eventLoop() {
 	}
 }
 
-// broadcastHeartbeats stub (will be expanded in Stage 5)
-func (rn *RaftNode) broadcastHeartbeats() {}
+
 
 // applyLoop stub (will be expanded in Stage 5)
 func (rn *RaftNode) applyLoop() {
