@@ -2,8 +2,8 @@
 bin/
 *.exe
 *.test
-quorumd
-visualizer
+/quorumd
+/visualizer
 
 # Data & logs
 data/

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
@@ -10,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"systems-suite/quorum/pkg/raft"
 	"systems-suite/quorum/pkg/simulation"
+	"systems-suite/quorum/pkg/statemachine"
 )
 
 //go:embed assets/*
@@ -70,6 +73,61 @@ func NewServer(preferredPort int, cluster *simulation.Cluster) (*Server, error) 
 
 	// SSE Telemetry Stream
 	mux.HandleFunc("GET /api/stream", broker.Handler())
+
+	// Command Propose Endpoint
+	mux.HandleFunc("POST /api/cmd", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		leader, err := s.cluster.GetLeader()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		cmd, _ := json.Marshal(statemachine.Command{
+			Op:    statemachine.OpPut,
+			Key:   req.Key,
+			Value: req.Value,
+		})
+		idx, term, err := leader.Propose(cmd)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"index":   idx,
+			"term":    term,
+			"leader":  leader.ID(),
+		})
+	})
+
+	// Partition Trigger Endpoint
+	mux.HandleFunc("POST /api/partition", func(w http.ResponseWriter, r *http.Request) {
+		// Default 3-2 partition
+		n := len(s.cluster.Nodes)
+		if n >= 5 {
+			s.cluster.Net.Partitions().Partition(
+				[]raft.NodeID{"node-1", "node-2"},
+				[]raft.NodeID{"node-3", "node-4", "node-5"},
+			)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+	})
+
+	// Heal Cluster Endpoint
+	mux.HandleFunc("POST /api/heal", func(w http.ResponseWriter, r *http.Request) {
+		s.cluster.Net.Partitions().HealAll()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+	})
 
 	s.httpServer = &http.Server{
 		Handler:      mux,

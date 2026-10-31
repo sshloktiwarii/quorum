@@ -167,6 +167,60 @@ function connectSSE() {
     };
 }
 
+// REST actions
+async function submitKV(e) {
+    e.preventDefault();
+    const key = document.getElementById('kv-key').value.trim();
+    const val = document.getElementById('kv-val').value.trim();
+    if (!key || !val) return;
+
+    try {
+        const res = await fetch('/api/cmd', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, value: val })
+        });
+        const data = await res.json();
+        if (data.success) {
+            appendConsoleLog(`Propose accepted: ${key}=${val} (idx: ${data.index}, leader: ${data.leader})`);
+            document.getElementById('kv-key').value = '';
+            document.getElementById('kv-val').value = '';
+        } else {
+            appendConsoleLog(`Propose rejected: ${JSON.stringify(data)}`);
+        }
+    } catch (err) {
+        appendConsoleLog(`Network error proposing command: ${err}`);
+    }
+}
+
+async function triggerPartition() {
+    try {
+        const res = await fetch('/api/partition', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            appendConsoleLog('Partition injected: {node-1, node-2} vs {node-3, node-4, node-5}');
+            document.getElementById('topology-meta').textContent = '3-2 SPLIT PARTITION ACTIVE';
+            document.getElementById('topology-meta').style.color = 'var(--crimson)';
+        }
+    } catch (err) {
+        appendConsoleLog(`Failed to inject partition: ${err}`);
+    }
+}
+
+async function healCluster() {
+    try {
+        const res = await fetch('/api/heal', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            appendConsoleLog('Cluster network links healed: full mesh restored');
+            document.getElementById('topology-meta').textContent = 'ALL LINKS CONNECTED';
+            document.getElementById('topology-meta').style.color = 'var(--emerald)';
+        }
+    } catch (err) {
+        appendConsoleLog(`Failed to heal cluster: ${err}`);
+    }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
     connectSSE();
 });
