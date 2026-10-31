@@ -7,14 +7,14 @@ import (
 // startElection triggers election procedure (§5.2). Must be called with rn.mu locked.
 func (rn *RaftNode) startElection() {
 	rn.becomeCandidate()
+	rn.votesGranted = make(map[NodeID]bool)
 
-	votesGranted := 1
 	term := rn.currentTerm
 	lastLogIndex := rn.log.LastIndex()
 	lastLogTerm := rn.log.LastTerm()
 
-	// If single node cluster, immediately achieve majority
-	if votesGranted >= rn.config.QuorumSize() {
+	// If single node cluster (self is majority)
+	if 1 >= rn.config.QuorumSize() {
 		rn.becomeLeader()
 		return
 	}
@@ -26,11 +26,11 @@ func (rn *RaftNode) startElection() {
 		LastLogTerm:  lastLogTerm,
 	}
 
-	// Dispatch to peers (implemented in subsequent commit)
-	rn.dispatchRequestVotes(args, &votesGranted)
+	// Dispatch to peers
+	rn.dispatchRequestVotes(args)
 }
 
-func (rn *RaftNode) dispatchRequestVotes(args *RequestVoteArgs, votesGranted *int) {
+func (rn *RaftNode) dispatchRequestVotes(args *RequestVoteArgs) {
 	if rn.transport == nil {
 		return
 	}
@@ -51,7 +51,27 @@ func (rn *RaftNode) dispatchRequestVotes(args *RequestVoteArgs, votesGranted *in
 }
 
 func (rn *RaftNode) handleRequestVoteReply(peer NodeID, args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Implemented in subsequent commit
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+
+	// Stale response or already transitioned
+	if rn.role != RoleCandidate || args.Term != rn.currentTerm || reply.Term < rn.currentTerm {
+		return
+	}
+
+	// Higher term seen: step down immediately (§5.1)
+	if reply.Term > rn.currentTerm {
+		rn.becomeFollower(reply.Term, "")
+		return
+	}
+
+	if reply.VoteGranted {
+		rn.votesGranted[peer] = true
+		totalVotes := 1 + len(rn.votesGranted)
+		if totalVotes >= rn.config.QuorumSize() {
+			rn.becomeLeader()
+		}
+	}
 }
 
 // becomeLeader converts a candidate to leader upon receiving majority votes. Must be called with rn.mu held.

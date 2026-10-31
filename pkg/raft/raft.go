@@ -39,6 +39,9 @@ type RaftNode struct {
 	commitIndex Index
 	lastApplied Index
 
+	// Volatile state on candidates
+	votesGranted map[NodeID]bool
+
 	// Volatile state on leaders
 	nextIndex  map[NodeID]Index
 	matchIndex map[NodeID]Index
@@ -75,6 +78,7 @@ func NewRaftNode(cfg *Config, transport Transport, sm statemachine.StateMachine,
 		leaderID:       "",
 		commitIndex:    0,
 		lastApplied:    0,
+		votesGranted:   make(map[NodeID]bool),
 		nextIndex:      make(map[NodeID]Index),
 		matchIndex:     make(map[NodeID]Index),
 		stateMachine:   sm,
