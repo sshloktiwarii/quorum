@@ -47,7 +47,51 @@ func (rn *RaftNode) HandleAppendEntries(args *AppendEntriesArgs) *AppendEntriesR
 		return reply
 	}
 
-	// Suffix truncation and log append will be completed in Commit 27
+	// Rule 4: Suffix Truncation and Log Append (§5.3)
+	// If an existing entry conflicts with a new one (same index but different terms),
+	// delete the existing entry and all that follow it.
+	insertIndex := args.PrevLogIndex + 1
+	for i, newEntry := range args.Entries {
+		entryIdx := insertIndex + Index(i)
+		existingTerm, exists := rn.log.GetTerm(entryIdx)
+		if exists {
+			if existingTerm != newEntry.Term {
+				// Conflict: truncate existing suffix
+				rn.log.TruncateSuffix(entryIdx)
+				// Append this and all remaining new entries
+				for _, e := range args.Entries[i:] {
+					rn.log.Append(e)
+					if rn.wal != nil {
+						_ = rn.wal.WriteEntry(uint64(e.Index), uint64(e.Term), uint8(e.Type), e.Data)
+					}
+				}
+				break
+			}
+			// Identical entry already in log: continue
+		} else {
+			// Suffix reached: append remaining entries
+			for _, e := range args.Entries[i:] {
+				rn.log.Append(e)
+				if rn.wal != nil {
+					_ = rn.wal.WriteEntry(uint64(e.Index), uint64(e.Term), uint8(e.Type), e.Data)
+				}
+			}
+			break
+		}
+	}
+
+	// Rule 5: Commit Index Progression (§5.3)
+	// If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+	if args.LeaderCommit > rn.commitIndex {
+		lastNewIndex := rn.log.LastIndex()
+		if args.LeaderCommit < lastNewIndex {
+			rn.commitIndex = args.LeaderCommit
+		} else {
+			rn.commitIndex = lastNewIndex
+		}
+		rn.applyCond.Broadcast()
+	}
+
 	reply.Success = true
 	return reply
 }
