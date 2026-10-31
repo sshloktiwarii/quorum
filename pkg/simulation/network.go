@@ -68,6 +68,36 @@ func (net *SimulatedNetwork) RegisterEndpoint(ep *Endpoint) {
 	net.endpoints[ep.NodeID] = ep
 }
 
+// SetDropRate dynamically adjusts the packet drop probability in [0.0, 1.0].
+func (net *SimulatedNetwork) SetDropRate(rate float64) {
+	net.mu.Lock()
+	defer net.mu.Unlock()
+	net.config.DropRate = rate
+}
+
+// SetDupRate dynamically adjusts the packet duplication probability.
+func (net *SimulatedNetwork) SetDupRate(rate float64) {
+	net.mu.Lock()
+	defer net.mu.Unlock()
+	net.config.DupRate = rate
+}
+
+// shouldDrop tests if an outgoing packet should be dropped. Must be called with net.mu held.
+func (net *SimulatedNetwork) shouldDrop() bool {
+	if net.config.DropRate <= 0 {
+		return false
+	}
+	return net.rng.Float64() < net.config.DropRate
+}
+
+// shouldDuplicate tests if a packet should be duplicated. Must be called with net.mu held.
+func (net *SimulatedNetwork) shouldDuplicate() bool {
+	if net.config.DupRate <= 0 {
+		return false
+	}
+	return net.rng.Float64() < net.config.DupRate
+}
+
 // computeLatency returns a deterministic latency with jitter. Must be called with net.mu held.
 func (net *SimulatedNetwork) computeLatency() time.Duration {
 	if net.config.MaxLatency <= net.config.MinLatency {
@@ -105,6 +135,10 @@ func (nt *nodeTransport) SendInstallSnapshot(ctx context.Context, to raft.NodeID
 
 func (net *SimulatedNetwork) dispatchRequestVote(ctx context.Context, from, to raft.NodeID, args *raft.RequestVoteArgs) (*raft.RequestVoteReply, error) {
 	net.mu.Lock()
+	if net.shouldDrop() {
+		net.mu.Unlock()
+		return nil, ErrNetworkDrop
+	}
 	ep, exists := net.endpoints[to]
 	if !exists {
 		net.mu.Unlock()
@@ -117,8 +151,11 @@ func (net *SimulatedNetwork) dispatchRequestVote(ctx context.Context, from, to r
 
 	net.sched.Schedule(lat, EventDeliverRPC, from, to, func() {
 		reply := ep.OnRequestVote(args)
-		// Schedule reply return trip
 		net.mu.Lock()
+		if net.shouldDrop() {
+			net.mu.Unlock()
+			return
+		}
 		returnLat := net.computeLatency()
 		net.mu.Unlock()
 
@@ -137,6 +174,10 @@ func (net *SimulatedNetwork) dispatchRequestVote(ctx context.Context, from, to r
 
 func (net *SimulatedNetwork) dispatchAppendEntries(ctx context.Context, from, to raft.NodeID, args *raft.AppendEntriesArgs) (*raft.AppendEntriesReply, error) {
 	net.mu.Lock()
+	if net.shouldDrop() {
+		net.mu.Unlock()
+		return nil, ErrNetworkDrop
+	}
 	ep, exists := net.endpoints[to]
 	if !exists {
 		net.mu.Unlock()
@@ -150,6 +191,10 @@ func (net *SimulatedNetwork) dispatchAppendEntries(ctx context.Context, from, to
 	net.sched.Schedule(lat, EventDeliverRPC, from, to, func() {
 		reply := ep.OnAppendEntries(args)
 		net.mu.Lock()
+		if net.shouldDrop() {
+			net.mu.Unlock()
+			return
+		}
 		returnLat := net.computeLatency()
 		net.mu.Unlock()
 
@@ -168,6 +213,10 @@ func (net *SimulatedNetwork) dispatchAppendEntries(ctx context.Context, from, to
 
 func (net *SimulatedNetwork) dispatchSnapshot(ctx context.Context, from, to raft.NodeID, args *raft.InstallSnapshotArgs) (*raft.InstallSnapshotReply, error) {
 	net.mu.Lock()
+	if net.shouldDrop() {
+		net.mu.Unlock()
+		return nil, ErrNetworkDrop
+	}
 	ep, exists := net.endpoints[to]
 	if !exists {
 		net.mu.Unlock()
@@ -181,6 +230,10 @@ func (net *SimulatedNetwork) dispatchSnapshot(ctx context.Context, from, to raft
 	net.sched.Schedule(lat, EventDeliverRPC, from, to, func() {
 		reply := ep.OnSnapshot(args)
 		net.mu.Lock()
+		if net.shouldDrop() {
+			net.mu.Unlock()
+			return
+		}
 		returnLat := net.computeLatency()
 		net.mu.Unlock()
 
