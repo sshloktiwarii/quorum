@@ -34,11 +34,12 @@ type Endpoint struct {
 
 // SimulatedNetwork models a multi-node packet-switched mesh on the virtual clock.
 type SimulatedNetwork struct {
-	mu        sync.Mutex
-	sched     *Scheduler
-	config    NetworkConfig
-	rng       *rand.Rand
-	endpoints map[raft.NodeID]*Endpoint
+	mu         sync.Mutex
+	sched      *Scheduler
+	config     NetworkConfig
+	rng        *rand.Rand
+	endpoints  map[raft.NodeID]*Endpoint
+	partitions *PartitionMatrix
 }
 
 // NewSimulatedNetwork creates an initialized mesh driven by the given virtual clock scheduler.
@@ -54,11 +55,17 @@ func NewSimulatedNetwork(sched *Scheduler, cfg NetworkConfig) *SimulatedNetwork 
 	}
 
 	return &SimulatedNetwork{
-		sched:     sched,
-		config:    cfg,
-		rng:       rand.New(rand.NewSource(cfg.Seed)),
-		endpoints: make(map[raft.NodeID]*Endpoint),
+		sched:      sched,
+		config:     cfg,
+		rng:        rand.New(rand.NewSource(cfg.Seed)),
+		endpoints:  make(map[raft.NodeID]*Endpoint),
+		partitions: NewPartitionMatrix(),
 	}
+}
+
+// Partitions returns the partition matrix controlling link reachability.
+func (net *SimulatedNetwork) Partitions() *PartitionMatrix {
+	return net.partitions
 }
 
 // RegisterEndpoint registers a node's handlers with the network.
@@ -134,6 +141,9 @@ func (nt *nodeTransport) SendInstallSnapshot(ctx context.Context, to raft.NodeID
 }
 
 func (net *SimulatedNetwork) dispatchRequestVote(ctx context.Context, from, to raft.NodeID, args *raft.RequestVoteArgs) (*raft.RequestVoteReply, error) {
+	if net.partitions.IsBlocked(from, to) {
+		return nil, ErrNodeUnreachable
+	}
 	net.mu.Lock()
 	if net.shouldDrop() {
 		net.mu.Unlock()
@@ -150,6 +160,9 @@ func (net *SimulatedNetwork) dispatchRequestVote(ctx context.Context, from, to r
 	resCh := make(chan *raft.RequestVoteReply, 1)
 
 	net.sched.Schedule(lat, EventDeliverRPC, from, to, func() {
+		if net.partitions.IsBlocked(from, to) {
+			return
+		}
 		reply := ep.OnRequestVote(args)
 		net.mu.Lock()
 		if net.shouldDrop() {
@@ -160,6 +173,9 @@ func (net *SimulatedNetwork) dispatchRequestVote(ctx context.Context, from, to r
 		net.mu.Unlock()
 
 		net.sched.Schedule(returnLat, EventDeliverRPC, to, from, func() {
+			if net.partitions.IsBlocked(to, from) {
+				return
+			}
 			resCh <- reply
 		})
 	})
@@ -173,6 +189,9 @@ func (net *SimulatedNetwork) dispatchRequestVote(ctx context.Context, from, to r
 }
 
 func (net *SimulatedNetwork) dispatchAppendEntries(ctx context.Context, from, to raft.NodeID, args *raft.AppendEntriesArgs) (*raft.AppendEntriesReply, error) {
+	if net.partitions.IsBlocked(from, to) {
+		return nil, ErrNodeUnreachable
+	}
 	net.mu.Lock()
 	if net.shouldDrop() {
 		net.mu.Unlock()
@@ -189,6 +208,9 @@ func (net *SimulatedNetwork) dispatchAppendEntries(ctx context.Context, from, to
 	resCh := make(chan *raft.AppendEntriesReply, 1)
 
 	net.sched.Schedule(lat, EventDeliverRPC, from, to, func() {
+		if net.partitions.IsBlocked(from, to) {
+			return
+		}
 		reply := ep.OnAppendEntries(args)
 		net.mu.Lock()
 		if net.shouldDrop() {
@@ -199,6 +221,9 @@ func (net *SimulatedNetwork) dispatchAppendEntries(ctx context.Context, from, to
 		net.mu.Unlock()
 
 		net.sched.Schedule(returnLat, EventDeliverRPC, to, from, func() {
+			if net.partitions.IsBlocked(to, from) {
+				return
+			}
 			resCh <- reply
 		})
 	})
@@ -212,6 +237,9 @@ func (net *SimulatedNetwork) dispatchAppendEntries(ctx context.Context, from, to
 }
 
 func (net *SimulatedNetwork) dispatchSnapshot(ctx context.Context, from, to raft.NodeID, args *raft.InstallSnapshotArgs) (*raft.InstallSnapshotReply, error) {
+	if net.partitions.IsBlocked(from, to) {
+		return nil, ErrNodeUnreachable
+	}
 	net.mu.Lock()
 	if net.shouldDrop() {
 		net.mu.Unlock()
@@ -228,6 +256,9 @@ func (net *SimulatedNetwork) dispatchSnapshot(ctx context.Context, from, to raft
 	resCh := make(chan *raft.InstallSnapshotReply, 1)
 
 	net.sched.Schedule(lat, EventDeliverRPC, from, to, func() {
+		if net.partitions.IsBlocked(from, to) {
+			return
+		}
 		reply := ep.OnSnapshot(args)
 		net.mu.Lock()
 		if net.shouldDrop() {
@@ -238,6 +269,9 @@ func (net *SimulatedNetwork) dispatchSnapshot(ctx context.Context, from, to raft
 		net.mu.Unlock()
 
 		net.sched.Schedule(returnLat, EventDeliverRPC, to, from, func() {
+			if net.partitions.IsBlocked(to, from) {
+				return
+			}
 			resCh <- reply
 		})
 	})
