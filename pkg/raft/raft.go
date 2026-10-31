@@ -191,7 +191,7 @@ func (rn *RaftNode) eventLoop() {
 
 
 
-// applyLoop stub (will be expanded in Stage 5)
+// applyLoop continuously drains committed entries and delivers them to the state machine and client channel.
 func (rn *RaftNode) applyLoop() {
 	defer rn.doneWg.Done()
 	for {
@@ -203,8 +203,41 @@ func (rn *RaftNode) applyLoop() {
 			rn.mu.Unlock()
 			return
 		}
+
+		// Gather entries to apply under lock
+		var toApply []LogEntry
+		for rn.lastApplied < rn.commitIndex {
+			rn.lastApplied++
+			entry, ok := rn.log.GetEntry(rn.lastApplied)
+			if ok {
+				toApply = append(toApply, entry)
+			}
+		}
 		rn.mu.Unlock()
+
+		// Deliver to state machine and application channel outside lock
+		for _, entry := range toApply {
+			if entry.Type == EntryData && rn.stateMachine != nil {
+				rn.stateMachine.Apply(entry.Data, uint64(entry.Index))
+			}
+			msg := ApplyMsg{
+				CommandValid: true,
+				Command:      entry.Data,
+				CommandIndex: entry.Index,
+				CommandTerm:  entry.Term,
+			}
+			select {
+			case rn.applyCh <- msg:
+			case <-rn.stopCh:
+				return
+			}
+		}
 	}
+}
+
+// ApplyChannel returns the read-only channel where committed log commands are published.
+func (rn *RaftNode) ApplyChannel() <-chan ApplyMsg {
+	return rn.applyCh
 }
 
 // GetState returns current term, role, and whether node is leader.
