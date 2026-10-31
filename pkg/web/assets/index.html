@@ -2,9 +2,109 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>QUORUM // RAFT CONSENSUS HUD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QUORUM // DISTRIBUTED RAFT CONSENSUS HUD</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>QUORUM RAFT</h1>
+    <header>
+        <div class="logo-area">
+            <span class="logo-tag">QUORUM</span>
+            <span style="font-weight: 600; letter-spacing: 0.5px;">RAFT CONSENSUS ENGINE</span>
+        </div>
+        <div class="cluster-metrics">
+            <div class="metric-pill">
+                <span class="indicator" id="stream-indicator"></span>
+                <span class="metric-label">STREAM:</span>
+                <span class="metric-val" id="stream-status">LIVE</span>
+            </div>
+            <div class="metric-pill">
+                <span class="metric-label">LEADER:</span>
+                <span class="metric-val" id="hud-leader">--</span>
+            </div>
+            <div class="metric-pill">
+                <span class="metric-label">TERM:</span>
+                <span class="metric-val" id="hud-term">0</span>
+            </div>
+            <div class="metric-pill">
+                <span class="metric-label">QUORUM:</span>
+                <span class="metric-val" id="hud-quorum">3 / 5</span>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Topology Viewport -->
+        <section class="viewport-panel">
+            <div class="panel-header">
+                <span>CLUSTER TOPOLOGY & LINK MESH</span>
+                <span id="topology-meta" style="color: var(--emerald);">ALL LINKS CONNECTED</span>
+            </div>
+            <div class="topology-container">
+                <svg id="topology-canvas" viewBox="-250 -250 500 500">
+                    <g id="links-group"></g>
+                    <g id="nodes-group"></g>
+                </svg>
+            </div>
+        </section>
+
+        <!-- Side Deck -->
+        <aside class="side-deck">
+            <!-- Command Injector & Partition Deck -->
+            <div class="card-deck" style="max-height: 220px;">
+                <div class="panel-header">
+                    <span>CONTROL DECK & COMMAND INJECTION</span>
+                </div>
+                <div class="deck-body">
+                    <form id="kv-form" class="control-row" onsubmit="submitKV(event)">
+                        <input type="text" id="kv-key" placeholder="Key (e.g. balance)" class="hud-input" required>
+                        <input type="text" id="kv-val" placeholder="Value (e.g. 500)" class="hud-input" required>
+                        <button type="submit" class="hud-btn">PROPOSE</button>
+                    </form>
+                    <div class="control-row">
+                        <button type="button" class="hud-btn hud-btn-danger" style="flex: 1;" onclick="triggerPartition()">3-2 SPLIT PARTITION</button>
+                        <button type="button" class="hud-btn" style="flex: 1; background: #059669;" onclick="healCluster()">HEAL CLUSTER</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Replicated KV Matrix -->
+            <div class="card-deck" style="flex: 1;">
+                <div class="panel-header">
+                    <span>KEY-VALUE STATE MACHINE</span>
+                    <span id="kv-count">0 KEYS</span>
+                </div>
+                <div class="deck-body">
+                    <table class="kv-table">
+                        <thead>
+                            <tr>
+                                <th>Key</th>
+                                <th>Committed Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kv-tbody">
+                            <tr>
+                                <td colspan="2" style="color: var(--text-dim); text-align: center;">No committed data</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Event Log Console -->
+            <div class="card-deck" style="height: 160px;">
+                <div class="panel-header">
+                    <span>CONSENSUS TELEMETRY STREAM</span>
+                </div>
+                <div class="deck-body" style="padding: 6px;">
+                    <div id="event-console" class="console-log">
+                        <div class="console-entry">[SYSTEM] Initializing SSE telemetry listener...</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script src="app.js"></script>
 </body>
 </html>
