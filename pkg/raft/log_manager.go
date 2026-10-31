@@ -149,3 +149,46 @@ func (lm *LogManager) LastIndexOfTerm(term Term) (Index, bool) {
 	}
 	return 0, false
 }
+
+// Compact discards entries up to and including lastIndex, resetting the log baseline.
+func (lm *LogManager) Compact(lastIndex Index, lastTerm Term) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+
+	if lastIndex <= lm.lastIncludedIndex {
+		return
+	}
+
+	offset := int(lastIndex - lm.lastIncludedIndex)
+	var remaining []LogEntry
+	if offset < len(lm.entries) {
+		remaining = lm.entries[offset+1:]
+	}
+
+	newEntries := make([]LogEntry, 0, len(remaining)+1)
+	// Base dummy entry representing the snapshot point
+	newEntries = append(newEntries, LogEntry{
+		Index: lastIndex,
+		Term:  lastTerm,
+		Type:  EntryNoop,
+	})
+	for _, e := range remaining {
+		newEntries = append(newEntries, e.Clone())
+	}
+
+	lm.entries = newEntries
+	lm.lastIncludedIndex = lastIndex
+	lm.lastIncludedTerm = lastTerm
+}
+
+func (lm *LogManager) LastIncludedIndex() Index {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+	return lm.lastIncludedIndex
+}
+
+func (lm *LogManager) LastIncludedTerm() Term {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+	return lm.lastIncludedTerm
+}
