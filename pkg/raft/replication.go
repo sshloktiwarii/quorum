@@ -72,8 +72,9 @@ func (rn *RaftNode) replicateToPeer(peer NodeID) {
 	prevLogIndex := nextIdx - 1
 	prevLogTerm, ok := rn.log.GetTerm(prevLogIndex)
 	if !ok {
-		// Log has been compacted behind nextIdx: install snapshot will handle this (Stage 6)
+		// Log has been compacted behind nextIdx: install snapshot to catch up lagging peer (§7)
 		rn.mu.Unlock()
+		go rn.sendInstallSnapshot(peer)
 		return
 	}
 
