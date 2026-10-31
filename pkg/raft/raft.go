@@ -159,8 +159,8 @@ func (rn *RaftNode) handleElectionTimeout() {
 		return
 	}
 
-	// Follower or Candidate timed out without hearing from a valid leader: transition to candidate
-	rn.becomeCandidate()
+	// Follower or Candidate timed out without hearing from a valid leader: transition to candidate and start election
+	rn.startElection()
 }
 
 // eventLoop monitors election timeouts and heartbeat ticks.
