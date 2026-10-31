@@ -2,6 +2,7 @@ package raft
 
 import (
 	"context"
+	"sort"
 )
 
 // Propose submits a new command to the leader for replication across the cluster (§5.3).
@@ -147,5 +148,37 @@ func (rn *RaftNode) handleAppendEntriesReply(peer NodeID, args *AppendEntriesArg
 		return
 	}
 
-	// Success case will be handled in Commit 28
+	// Rule 5: Successful Replication (§5.3)
+	matchIdx := args.PrevLogIndex + Index(len(args.Entries))
+	if matchIdx > rn.matchIndex[peer] {
+		rn.matchIndex[peer] = matchIdx
+	}
+	rn.nextIndex[peer] = rn.matchIndex[peer] + 1
+
+	// Rule 6: Leader Commit Rule (§5.3, §5.4.2)
+	// If there exists an N such that N > commitIndex, a majority of matchIndex[i] >= N,
+	// and log[N].term == currentTerm: set commitIndex = N
+	matchIndices := make([]Index, 0, len(rn.config.Peers)+1)
+	matchIndices = append(matchIndices, rn.log.LastIndex()) // leader's own match index
+	for _, p := range rn.config.Peers {
+		matchIndices = append(matchIndices, rn.matchIndex[p])
+	}
+	// Sort ascending: median is at index (len - QuorumSize)
+	sort.Slice(matchIndices, func(i, j int) bool {
+		return matchIndices[i] < matchIndices[j]
+	})
+
+	medianIndex := matchIndices[len(matchIndices)-rn.config.QuorumSize()]
+	if medianIndex > rn.commitIndex {
+		termAtN, ok := rn.log.GetTerm(medianIndex)
+		if ok && termAtN == rn.currentTerm {
+			rn.commitIndex = medianIndex
+			rn.applyCond.Broadcast()
+		}
+	}
+
+	// If there are more entries remaining, continue replicating
+	if rn.log.LastIndex() >= rn.nextIndex[peer] {
+		go rn.replicateToPeer(peer)
+	}
 }
