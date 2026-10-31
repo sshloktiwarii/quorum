@@ -3,6 +3,7 @@ package linearizability
 import (
 	"errors"
 	"fmt"
+	"sort"
 )
 
 var (
@@ -38,8 +39,18 @@ func (c *Checker) Verify(history []Operation) (bool, []Operation, error) {
 
 	n := len(ops)
 	if n > 64 {
-		// Partition by key if history exceeds single-word bitmask
+		// Partition by key or quiescent epochs if history exceeds single-word bitmask
 		return c.verifyPartitionedByKey(ops)
+	}
+
+	ok, order, _, err := c.verifyChunkWithState(ops, make(map[string]string))
+	return ok, order, err
+}
+
+func (c *Checker) verifyChunkWithState(ops []Operation, initialState map[string]string) (bool, []Operation, map[string]string, error) {
+	n := len(ops)
+	if n == 0 {
+		return true, nil, initialState, nil
 	}
 
 	// Build real-time precedence dependencies: if op1.ReturnAt < op2.InvokeAt => op1 < op2
@@ -54,10 +65,12 @@ func (c *Checker) Verify(history []Operation) (bool, []Operation, error) {
 
 	memo := make(map[string]bool)
 	var linearOrder []Operation
+	var finalState map[string]string
 
 	var dfs func(executed uint64, state map[string]string) bool
 	dfs = func(executed uint64, state map[string]string) bool {
 		if executed == (1<<n)-1 {
+			finalState = state
 			return true
 		}
 
@@ -83,25 +96,67 @@ func (c *Checker) Verify(history []Operation) (bool, []Operation, error) {
 		return false
 	}
 
-	initialState := make(map[string]string)
 	success := dfs(0, initialState)
 	if !success {
-		return false, nil, ErrNonLinearizable
+		return false, nil, nil, ErrNonLinearizable
 	}
 
-	return true, linearOrder, nil
+	return true, linearOrder, finalState, nil
 }
 
-// verifyPartitionedByKey splits multi-key histories into independent per-key verification passes.
+// verifyPartitionedByKey splits multi-key histories into independent per-key verification passes,
+// or splits single-key histories into quiescent epochs if length exceeds 64.
 func (c *Checker) verifyPartitionedByKey(ops []Operation) (bool, []Operation, error) {
 	byKey := make(map[string][]Operation)
 	for _, op := range ops {
 		byKey[op.Key] = append(byKey[op.Key], op)
 	}
 
+	if len(byKey) > 1 {
+		var combinedOrder []Operation
+		for _, keyOps := range byKey {
+			ok, order, err := c.Verify(keyOps)
+			if !ok || err != nil {
+				return false, nil, err
+			}
+			combinedOrder = append(combinedOrder, order...)
+		}
+		return true, combinedOrder, nil
+	}
+
+	// Single key with > 64 operations: sort by InvokeAt and split into quiescent epochs
+	sort.Slice(ops, func(i, j int) bool {
+		if ops[i].InvokeAt != ops[j].InvokeAt {
+			return ops[i].InvokeAt < ops[j].InvokeAt
+		}
+		return ops[i].ReturnAt < ops[j].ReturnAt
+	})
+
+	currentState := make(map[string]string)
 	var combinedOrder []Operation
-	for _, keyOps := range byKey {
-		ok, order, err := c.Verify(keyOps)
+
+	start := 0
+	maxReturn := ops[0].ReturnAt
+	for i := 1; i < len(ops); i++ {
+		// Quiescent point: all prior ops returned before ops[i] was invoked, OR chunk reached 64
+		if ops[i].InvokeAt >= maxReturn || (i-start) >= 64 {
+			chunk := ops[start:i]
+			ok, order, nextState, err := c.verifyChunkWithState(chunk, currentState)
+			if !ok || err != nil {
+				return false, nil, err
+			}
+			combinedOrder = append(combinedOrder, order...)
+			currentState = nextState
+			start = i
+			maxReturn = ops[i].ReturnAt
+		} else if ops[i].ReturnAt > maxReturn {
+			maxReturn = ops[i].ReturnAt
+		}
+	}
+
+	if start < len(ops) {
+		chunk := ops[start:]
+		ok, order, _, err := c.verifyChunkWithState(chunk, currentState)
 		if !ok || err != nil {
 			return false, nil, err
 		}
