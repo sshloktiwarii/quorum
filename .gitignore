@@ -1,0 +1,21 @@
+# Binaries
+bin/
+*.exe
+*.test
+quorumd
+visualizer
+
+# Data & logs
+data/
+*.wal
+*.snap
+*.tmp
+
+# Coverage & profiling
+*.out
+*.prof
+
+# OS & IDE
+.DS_Store
+.idea/
+.vscode/
