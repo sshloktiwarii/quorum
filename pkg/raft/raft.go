@@ -204,11 +204,10 @@ func (rn *RaftNode) applyLoop() {
 			return
 		}
 
-		// Gather entries to apply under lock
+		// Gather entries to apply under lock without prematurely advancing lastApplied
 		var toApply []LogEntry
-		for rn.lastApplied < rn.commitIndex {
-			rn.lastApplied++
-			entry, ok := rn.log.GetEntry(rn.lastApplied)
+		for idx := rn.lastApplied + 1; idx <= rn.commitIndex; idx++ {
+			entry, ok := rn.log.GetEntry(idx)
 			if ok {
 				toApply = append(toApply, entry)
 			}
@@ -220,6 +219,10 @@ func (rn *RaftNode) applyLoop() {
 			if entry.Type == EntryData && rn.stateMachine != nil {
 				rn.stateMachine.Apply(entry.Data, uint64(entry.Index))
 			}
+			rn.mu.Lock()
+			rn.lastApplied = entry.Index
+			rn.mu.Unlock()
+
 			msg := ApplyMsg{
 				CommandValid: true,
 				Command:      entry.Data,

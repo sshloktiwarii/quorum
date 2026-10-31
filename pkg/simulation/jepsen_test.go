@@ -92,18 +92,19 @@ func TestJepsenSplitBrainAndHeal(t *testing.T) {
 	}
 
 	// Step simulation for election in majority group
-	for i := 0; i < 20; i++ {
-		cluster.Sched.RunUntil(cluster.Sched.Now() + 40*time.Millisecond)
-		time.Sleep(15 * time.Millisecond)
-	}
-
-	// 6. Find newly elected majority leader
 	var majorityLeader *raft.RaftNode
-	for _, id := range majorityNodes {
-		node := cluster.Nodes[id]
-		_, isL := node.GetState()
-		if isL {
-			majorityLeader = node
+	for i := 0; i < 40; i++ {
+		cluster.Sched.RunUntil(cluster.Sched.Now() + 40*time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
+		for _, id := range majorityNodes {
+			node := cluster.Nodes[id]
+			_, isL := node.GetState()
+			if isL {
+				majorityLeader = node
+				break
+			}
+		}
+		if majorityLeader != nil {
 			break
 		}
 	}

@@ -37,7 +37,7 @@ func (rn *RaftNode) dispatchRequestVotes(args *RequestVoteArgs) {
 	for _, peer := range rn.config.Peers {
 		peerID := peer
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), rn.config.HeartbeatInterval*2)
+			ctx, cancel := context.WithTimeout(context.Background(), rn.config.MaxElectionTimeout*2)
 			defer cancel()
 
 			reply, err := rn.transport.SendRequestVote(ctx, peerID, args)
@@ -100,6 +100,11 @@ func (rn *RaftNode) becomeLeader() {
 		_ = rn.wal.WriteEntry(uint64(noop.Index), uint64(noop.Term), uint8(noop.Type), nil)
 	}
 
-	// Immediately broadcast initial heartbeats
-	rn.broadcastHeartbeats()
+	if rn.config.QuorumSize() <= 1 {
+		rn.commitIndex = noop.Index
+		rn.applyCond.Broadcast()
+	} else {
+		// Immediately broadcast initial heartbeats
+		rn.broadcastHeartbeats()
+	}
 }

@@ -32,8 +32,13 @@ func (rn *RaftNode) Propose(data []byte) (Index, Term, error) {
 		_ = rn.wal.WriteEntry(uint64(entry.Index), uint64(entry.Term), uint8(entry.Type), entry.Data)
 	}
 
-	// Trigger immediate replication
-	rn.broadcastAppendEntries()
+	if rn.config.QuorumSize() <= 1 {
+		rn.commitIndex = newIndex
+		rn.applyCond.Broadcast()
+	} else {
+		// Trigger immediate replication
+		rn.broadcastAppendEntries()
+	}
 
 	return newIndex, term, nil
 }
@@ -98,7 +103,7 @@ func (rn *RaftNode) replicateToPeer(peer NodeID) {
 	}
 	rn.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), rn.config.HeartbeatInterval*2)
+	ctx, cancel := context.WithTimeout(context.Background(), rn.config.MaxElectionTimeout*2)
 	defer cancel()
 
 	reply, err := rn.transport.SendAppendEntries(ctx, peer, args)

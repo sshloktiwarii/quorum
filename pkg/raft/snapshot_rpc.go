@@ -97,7 +97,7 @@ func (rn *RaftNode) sendInstallSnapshot(peer NodeID) {
 		Done:              true,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), rn.config.HeartbeatInterval*4)
+	ctx, cancel := context.WithTimeout(context.Background(), rn.config.MaxElectionTimeout*4)
 	defer cancel()
 
 	reply, err := rn.transport.SendInstallSnapshot(ctx, peer, args)
