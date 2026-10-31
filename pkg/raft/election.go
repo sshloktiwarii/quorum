@@ -1,5 +1,9 @@
 package raft
 
+import (
+	"context"
+)
+
 // startElection triggers election procedure (§5.2). Must be called with rn.mu locked.
 func (rn *RaftNode) startElection() {
 	rn.becomeCandidate()
@@ -26,7 +30,29 @@ func (rn *RaftNode) startElection() {
 	rn.dispatchRequestVotes(args, &votesGranted)
 }
 
-func (rn *RaftNode) dispatchRequestVotes(args *RequestVoteArgs, votesGranted *int) {}
+func (rn *RaftNode) dispatchRequestVotes(args *RequestVoteArgs, votesGranted *int) {
+	if rn.transport == nil {
+		return
+	}
+	for _, peer := range rn.config.Peers {
+		peerID := peer
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), rn.config.HeartbeatInterval*2)
+			defer cancel()
+
+			reply, err := rn.transport.SendRequestVote(ctx, peerID, args)
+			if err != nil {
+				return
+			}
+
+			rn.handleRequestVoteReply(peerID, args, reply)
+		}()
+	}
+}
+
+func (rn *RaftNode) handleRequestVoteReply(peer NodeID, args *RequestVoteArgs, reply *RequestVoteReply) {
+	// Implemented in subsequent commit
+}
 
 // becomeLeader converts a candidate to leader upon receiving majority votes. Must be called with rn.mu held.
 func (rn *RaftNode) becomeLeader() {
