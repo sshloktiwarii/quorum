@@ -107,5 +107,45 @@ func (rn *RaftNode) replicateToPeer(peer NodeID) {
 	rn.handleAppendEntriesReply(peer, args, reply)
 }
 
-// handleAppendEntriesReply stub (will be expanded in subsequent commits)
-func (rn *RaftNode) handleAppendEntriesReply(peer NodeID, args *AppendEntriesArgs, reply *AppendEntriesReply) {}
+// handleAppendEntriesReply processes replication responses on the leader.
+func (rn *RaftNode) handleAppendEntriesReply(peer NodeID, args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+
+	if rn.role != RoleLeader || args.Term != rn.currentTerm || reply.Term < rn.currentTerm {
+		return
+	}
+
+	// Higher term discovered: step down immediately (§5.1)
+	if reply.Term > rn.currentTerm {
+		rn.becomeFollower(reply.Term, "")
+		return
+	}
+
+	if !reply.Success {
+		// Fast conflict recovery resolution
+		if reply.ConflictTerm > 0 {
+			if lastIdx, found := rn.log.LastIndexOfTerm(reply.ConflictTerm); found {
+				rn.nextIndex[peer] = lastIdx + 1
+			} else {
+				rn.nextIndex[peer] = reply.ConflictIndex
+			}
+		} else if reply.ConflictIndex > 0 {
+			rn.nextIndex[peer] = reply.ConflictIndex
+		} else {
+			if rn.nextIndex[peer] > 1 {
+				rn.nextIndex[peer]--
+			}
+		}
+
+		if rn.nextIndex[peer] < 1 {
+			rn.nextIndex[peer] = 1
+		}
+
+		// Retry replication immediately with updated nextIndex
+		go rn.replicateToPeer(peer)
+		return
+	}
+
+	// Success case will be handled in Commit 28
+}

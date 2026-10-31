@@ -123,3 +123,29 @@ func (lm *LogManager) Slice(from, to Index) []LogEntry {
 	}
 	return result
 }
+
+// FirstIndexOfTerm scans from lastIncludedIndex upwards to find the first entry matching term.
+func (lm *LogManager) FirstIndexOfTerm(term Term) Index {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+
+	for _, e := range lm.entries {
+		if e.Term == term {
+			return e.Index
+		}
+	}
+	return lm.lastIncludedIndex + 1
+}
+
+// LastIndexOfTerm scans backwards to find the last entry with the given term.
+func (lm *LogManager) LastIndexOfTerm(term Term) (Index, bool) {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+
+	for i := len(lm.entries) - 1; i >= 0; i-- {
+		if lm.entries[i].Term == term {
+			return lm.entries[i].Index, true
+		}
+	}
+	return 0, false
+}

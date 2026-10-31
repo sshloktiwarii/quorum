@@ -41,10 +41,9 @@ func (rn *RaftNode) HandleAppendEntries(args *AppendEntriesArgs) *AppendEntriesR
 
 	termAtPrev, ok := rn.log.GetTerm(args.PrevLogIndex)
 	if !ok || termAtPrev != args.PrevLogTerm {
-		// Log conflict at prevLogIndex
+		// Log conflict at prevLogIndex: return ConflictTerm and first index of that term
 		reply.ConflictTerm = termAtPrev
-		// Fast conflict hint logic will be completed in Commit 26
-		reply.ConflictIndex = args.PrevLogIndex
+		reply.ConflictIndex = rn.log.FirstIndexOfTerm(termAtPrev)
 		return reply
 	}
 
